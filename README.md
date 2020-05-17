@@ -82,3 +82,9 @@ async blobToString(blob) {
 - Web Worker
   - 借助 `spark-md5`进行计算
 - 利用浏览器渲染每帧的空余时间(`window.requestIdleCallback()`)
+- 抽样Hash
+
+#### 切片上传
+#### 后端文件合并
+#### 秒传
+#### 断点续传

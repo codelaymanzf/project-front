@@ -339,27 +339,95 @@ export default {
                     form.append("hash", chunk.hash);
                     form.append("name", chunk.name);
                     return {
-                      form,
-                      index: chunk.index
+                        form,
+                        index: chunk.index,
+                        error: 0
                     };
-                })
-                .map(({form, index}) =>
-                    this.$http.post("/uploadfile", form, {
-                        onUploadProgress: progress => {
-                            // 每个区块的进度条
-                            this.chunks[index].progress = Number(
-                                (
-                                    (progress.loaded / progress.total) *
-                                    100
-                                ).toFixed(2)
-                            );
-                        }
-                    })
-                );
+                });
+            // .map(({form, index}) =>
+            //     this.$http.post("/uploadfile", form, {
+            //         onUploadProgress: progress => {
+            //             // 每个区块的进度条
+            //             this.chunks[index].progress = Number(
+            //                 (
+            //                     (progress.loaded / progress.total) *
+            //                     100
+            //                 ).toFixed(2)
+            //             );
+            //         }
+            //     })
+            // );
             // @to-do并发控制
-            await Promise.all(requests);
+            // 尝试申请tcp连接过多，也会造成卡顿
+            // 异步的并发数控制
+            // await Promise.all(requests);
+            await this.sendRequest(requests);
             // 给后端发送文件合并请求
             this.mergeRequest();
+        },
+        // 上传可能报错
+        // 报错之后进度条变红，开始重试
+        // 一个切片重试失败三次，整体全部终止
+        async sendRequest(chunks, limit = 3) {
+            return new Promise((resolve, reject) => {
+                const len = chunks.length;
+                let counter = 0;
+                let isStop = false;
+
+                const start = async () => {
+                    if(isStop) {
+                        return;
+                    }
+                    
+                    const task = chunks.shift();
+                    if (task) {
+                        const { form, index } = task;
+
+                        try {
+                            await this.$http.post("/uploadfile", form, {
+                                onUploadProgress: progress => {
+                                    // 每个区块的进度条
+                                    this.chunks[index].progress = Number(
+                                        (
+                                            (progress.loaded / progress.total) *
+                                            100
+                                        ).toFixed(2)
+                                    );
+                                }
+                            });
+
+                            if (counter == len - 1) {
+                                // 最后一个任务
+                                resolve();
+                            } else {
+                                counter++;
+                                // 启动下一个任务
+                                start();
+                            }
+                        } catch (e) {
+                            this.chunks[index].progress = -1;
+                            if(task.error < 3) {
+                                task.error++;
+                                chunks.unshift(task); // 出错后马上重试
+                                start();
+                            } else {
+                                // 错误三次
+                                isStop = true;
+                                reject();
+                            }
+                        }
+                    }
+                };
+                while (limit > 0) {
+                    // 启动limit个任务
+                    // 模拟一下延时
+                    setTimeout(() => {
+                        start();
+                    }, Math.random() * 2000);
+
+                    limit -= 1;
+                }
+            });
         },
         async mergeRequest() {
             this.$http.post("/mergefile", {
